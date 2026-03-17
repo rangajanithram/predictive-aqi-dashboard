@@ -9,7 +9,7 @@ CITY = "bangalore"
 TOKEN = os.getenv("WAQI_TOKEN")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
+ 
 # Initialize Supabase client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def fetch_aqi_data(city, token):
