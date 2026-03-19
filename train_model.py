@@ -7,65 +7,84 @@ from sklearn.metrics import mean_absolute_error, r2_score
 import joblib
 
 # 🗄️ SUPABASE CONFIGURATION
-# Paste your keys here just like you did for the seeder
 SUPABASE_URL = "https://cleothngpaqybiomauei.supabase.co"
+
 SUPABASE_KEY = "sb_publishable_MnROBSTNKcCxzGr6CDPmEA_sIiagimS"
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def fetch_all_data():
-    print("📥 Downloading historical data from Supabase...")
-    # Fetching up to 1000 rows
-    response = supabase.table('air_quality_logs').select("*").limit(1000).execute()
-    data = response.data
-    return pd.DataFrame(data)
+    print("📥 Downloading All-India data (Bypassing 1000-row safety limit via Pagination)...")
+    all_data = []
+    start = 0
+    limit = 1000
+    
+    # Keep asking Supabase for chunks of 1000 until there is nothing left
+    while True:
+        response = supabase.table('air_quality_logs').select("*").range(start, start + limit - 1).execute()
+        data = response.data
+        
+        if not data:
+            break # We got all the data!
+            
+        all_data.extend(data)
+        start += limit
+        print(f"   ...Downloaded {len(all_data)} rows so far")
+        
+    return pd.DataFrame(all_data)
 
 def prepare_data(df):
-    print("⚙️ Preparing data and engineering features...")
-    # Convert string timestamp to actual datetime object
+    print("⚙️ Engineering advanced features...")
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     
-    # Feature Engineering: The model can't read "dates", but it CAN read numbers.
-    # Let's extract the hour and day of the week so it learns traffic patterns!
+    # Sort by city and time so we can look at the "past" accurately
+    df = df.sort_values(by=['city', 'timestamp'])
+    
     df['hour'] = df['timestamp'].dt.hour
-    df['day_of_week'] = df['timestamp'].dt.dayofweek # 0=Monday, 6=Sunday
+    df['day_of_week'] = df['timestamp'].dt.dayofweek
     
-    # Select our Features (X) and our Target (y)
-    features = ['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week']
+    # 🪄 ADVANCED DATA SCIENCE: The "Lag" Feature
+    # Teach the model what the AQI was 1 hour ago and 2 hours ago in that specific city
+    df['aqi_1_hour_ago'] = df.groupby('city')['aqi'].shift(1)
+    df['aqi_2_hours_ago'] = df.groupby('city')['aqi'].shift(2)
     
-    # Drop any rows that might have missing data
-    df = df.dropna(subset=features + ['aqi'])
+    # 🪄 ONE-HOT ENCODING
+    city_dummies = pd.get_dummies(df['city'], prefix='city')
     
-    X = df[features]
-    y = df['aqi']
+    base_features = ['temperature', 'humidity', 'wind_speed', 'hour', 'day_of_week', 'aqi_1_hour_ago', 'aqi_2_hours_ago']
+    
+    df_processed = pd.concat([df[base_features + ['aqi']], city_dummies], axis=1)
+    
+    # Drop rows that don't have past data (like the very first row of the dataset)
+    df_processed = df_processed.dropna()
+    
+    y = df_processed['aqi']
+    X = df_processed.drop('aqi', axis=1)
     
     return X, y
 
 if __name__ == "__main__":
-    # 1. Get the data
     df = fetch_all_data()
-    print(f"📊 Loaded {len(df)} rows of data.")
+    print(f"📊 Total Dataset Loaded: {len(df)} rows.")
     
-    # 2. Prepare it
     X, y = prepare_data(df)
     
-    # 3. Split into Training Data (80%) and Testing Data (20%)
+    expected_columns = X.columns.tolist()
+    joblib.dump(expected_columns, 'model_columns.pkl')
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
-    # 4. Train the Model!
-    print("🧠 Training the Random Forest Regressor...")
+    print("🧠 Training the highly advanced Random Forest Model...")
     model = RandomForestRegressor(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     
-    # 5. Test the Model's accuracy
     predictions = model.predict(X_test)
     mae = mean_absolute_error(y_test, predictions)
     score = r2_score(y_test, predictions)
     
-    print("\n✅ Model Training Complete!")
+    print("\n✅ Advanced Training Complete!")
     print(f"🎯 Mean Absolute Error (MAE): {mae:.2f} AQI points")
     print(f"📈 R2 Score (Accuracy): {score:.2f} (1.0 is perfect)")
     
-    # 6. Save the trained model to a file
     joblib.dump(model, 'aqi_model.pkl')
-    print("\n💾 Model saved successfully as 'aqi_model.pkl'!")
+    print("\n💾 Model saved successfully!")
